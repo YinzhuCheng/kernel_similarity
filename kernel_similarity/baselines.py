@@ -35,6 +35,7 @@ def train_contrastive(
     input_dim: int,
     config: ContrastiveConfig,
 ) -> ContrastiveRetriever:
+    # 简单对比学习 baseline
     model = ContrastiveRetriever(input_dim, config.projection_dim, config.temperature).to(
         config.device
     )
@@ -79,6 +80,7 @@ def score_contrastive(
     doc_matrix: np.ndarray,
     device: str,
 ) -> np.ndarray:
+    # 计算对比学习打分
     model.eval()
     q = torch.tensor(query_vec, dtype=torch.float32, device=device).unsqueeze(0)
     d = torch.tensor(doc_matrix, dtype=torch.float32, device=device)

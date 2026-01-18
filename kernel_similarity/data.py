@@ -1,9 +1,10 @@
 import json
+import os
 import random
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Tuple
 
-from .utils import normalize_text
+from .utils import ensure_dir, normalize_text, save_json
 
 
 @dataclass
@@ -81,10 +82,34 @@ def build_positive_map(qrels: Dict[str, List[Tuple[str, int]]]) -> Dict[str, Lis
 def split_queries(
     query_ids: List[str], train_ratio: float, seed: int
 ) -> Tuple[List[str], List[str]]:
+    # 固定随机种子，生成稳定的训练/测试划分
     rng = random.Random(seed)
     shuffled = list(query_ids)
     rng.shuffle(shuffled)
     train_size = max(1, int(len(shuffled) * train_ratio))
     train_ids = shuffled[:train_size]
     test_ids = shuffled[train_size:]
+    return train_ids, test_ids
+
+
+def load_or_create_split(
+    split_path: str, query_ids: List[str], train_ratio: float, seed: int
+) -> Tuple[List[str], List[str]]:
+    # 如果已有划分文件就直接复用，保证后续运行一致
+    if split_path and os.path.exists(split_path):
+        with open(split_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        train_ids = [qid for qid in data.get("train", []) if qid in query_ids]
+        test_ids = [qid for qid in data.get("test", []) if qid in query_ids]
+        if train_ids and test_ids:
+            return train_ids, test_ids
+    train_ids, test_ids = split_queries(query_ids, train_ratio, seed)
+    if split_path:
+        split_dir = os.path.dirname(split_path)
+        if split_dir:
+            ensure_dir(split_dir)
+        save_json(
+            split_path,
+            {"train": train_ids, "test": test_ids, "seed": seed, "train_ratio": train_ratio},
+        )
     return train_ids, test_ids

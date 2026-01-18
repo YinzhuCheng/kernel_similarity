@@ -87,6 +87,7 @@ def train_multiquery_gp(
     kernel: WeightedKernel,
     config: GPTrainingConfig,
 ) -> Dict[str, float]:
+    # 共享多核参数，在所有训练 query 上联合优化
     likelihood = gpytorch.likelihoods.BernoulliLikelihood().to(config.device)
     mlls = {
         qid: gpytorch.mlls.VariationalELBO(
@@ -129,6 +130,7 @@ def train_single_query_gp(
     config: GPTrainingConfig,
     seed: int,
 ) -> SparseGPClassifier:
+    # 固定多核参数，仅训练单 query 的 GP 近似参数
     model = SparseGPClassifier(
         _init_inducing_points(x, config.inducing_points, config.inducing_init, seed),
         kernel,

@@ -28,6 +28,7 @@ class OpenAIEmbeddingClient:
         self.timeout = timeout
 
     def embed(self, inputs: List[str]) -> List[List[float]]:
+        # OpenAI 兼容接口
         url = f"{self.api_base}/v1/embeddings"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -63,6 +64,7 @@ def ensure_embeddings(
     config: EmbeddingConfig,
     label: str,
 ) -> np.ndarray:
+    # 优先加载缓存，只补齐缺失的嵌入
     if len(ids) != len(texts):
         raise ValueError("IDs and texts size mismatch.")
     if not ids:

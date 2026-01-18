@@ -19,13 +19,15 @@ Multi-kernel sparse GP ranking with per-query GPs and shared kernel learning.
 - `qrels.tsv`: `query_id<TAB>doc_id<TAB>relevance`
 
 ## Run
-Example (SciFact layout):
-`python -m kernel_similarity --corpus data/corpus.jsonl --queries data/queries.jsonl --qrels data/qrels.tsv --embedding-api-base https://api.openai.com --embedding-api-key $EMBEDDING_API_KEY`
+Edit parameters in `kernel_similarity/config.py`, then run:
+`python -m kernel_similarity`
 
 Default training uses 20% of queries for kernel learning and 80% for evaluation. Each test query trains a new sparse GP with fixed kernel parameters and its own sampled positives/negatives, then reranks candidates by the GP posterior mean.
 
 ## Notes
 - GP training defaults to CPU; use `--device cuda` to enable GPU when available.
-- Use `--cache-dir` and `--cache-only` to reuse cached embeddings.
-- Candidate reranking defaults to top 200 documents (`--rerank-top-n`).
+- Use `cache_dir` and `cache_only` to reuse cached embeddings.
+- Candidate reranking defaults to top 200 documents (`RetrievalSettings.rerank_top_n`).
+- Use `ExperimentSettings.experiments` to run a single experiment (e.g., `["bm25"]` or `["ours"]`).
+- Query splits are saved to `DataConfig.split_path` and reused on subsequent runs.
 - Output summary is written to `runs/summary_<timestamp>.json` with kernel weights and metrics.
