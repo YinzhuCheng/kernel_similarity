@@ -21,6 +21,7 @@ class EmbeddingSettings:
     doc_model: str = "text-embedding-3-large"
     query_model: str = "text-embedding-3-large"
     batch_size: int = 32
+    concurrency: int = 4
     timeout: float = 60.0
     cache_dir: str = "cache"
     cache_only: bool = False
