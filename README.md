@@ -25,7 +25,7 @@ Edit parameters in `kernel_similarity/config.py`, then run:
 Default training uses 20% of queries for kernel learning and 80% for evaluation. Each test query trains a new sparse GP with fixed kernel parameters and its own sampled positives/negatives, then reranks candidates by the GP posterior mean.
 
 ## Notes
-- GP training defaults to CPU; use `--device cuda` to enable GPU when available.
+- GP training defaults to CPU; set `TrainingSettings.device = "cuda"` to enable GPU when available.
 - Use `cache_dir` and `cache_only` to reuse cached embeddings.
 - Candidate reranking defaults to top 200 documents (`RetrievalSettings.rerank_top_n`).
 - Use `ExperimentSettings.experiments` to run a single experiment (e.g., `["bm25"]` or `["ours"]`).
