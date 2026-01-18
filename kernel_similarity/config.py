@@ -52,11 +52,10 @@ class GPSettings:
 @dataclass
 class KernelSettings:
     # 多核配置
-    use_rbf: bool = True
-    use_matern: bool = True
-    matern_nu: float = 2.5
-    use_poly: bool = True
-    poly_degree: int = 2
+    rbf_kernels: int = 1
+    matern_nus: List[float] = field(default_factory=lambda: [2.5])
+    poly_degrees: List[int] = field(default_factory=lambda: [2])
+    poly_offsets: List[float] = field(default_factory=lambda: [0.0])
 
 
 @dataclass

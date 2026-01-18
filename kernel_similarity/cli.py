@@ -242,11 +242,10 @@ def run(config: RunConfig) -> None:
     # 5) 共享多核训练（仅 our method）
     if "ours" in experiments:
         kernel_config = KernelConfig(
-            use_rbf=config.kernel.use_rbf,
-            use_matern=config.kernel.use_matern,
-            use_poly=config.kernel.use_poly,
-            matern_nu=config.kernel.matern_nu,
-            poly_degree=config.kernel.poly_degree,
+            rbf_kernels=config.kernel.rbf_kernels,
+            matern_nus=config.kernel.matern_nus,
+            poly_degrees=config.kernel.poly_degrees,
+            poly_offsets=config.kernel.poly_offsets,
         )
         kernel = build_weighted_kernel(kernel_config).to(device)
         gp_config = GPTrainingConfig(

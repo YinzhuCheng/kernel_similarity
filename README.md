@@ -32,3 +32,4 @@ Default training uses 20% of queries for kernel learning and 80% for evaluation.
 - Use `ExperimentSettings.experiments` to run a single experiment (e.g., `["bm25"]` or `["ours"]`).
 - Query splits are saved to `DataConfig.split_path` and reused on subsequent runs.
 - Output summary is written to `runs/summary_<timestamp>.json` with kernel weights and metrics.
+- Kernel components are configured by `KernelSettings` lists (`matern_nus`, `poly_degrees`, `poly_offsets`) and `rbf_kernels` count.
