@@ -31,7 +31,8 @@ class SparseGPClassifier(gpytorch.models.ApproximateGP):
             learn_inducing_locations=True,
         )
         super().__init__(variational_strategy)
-        self.mean_module = gpytorch.means.ZeroMean()
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.mean_module.initialize(constant=0.0)
         self.covar_module = kernel
 
     def forward(self, x):
@@ -132,44 +133,3 @@ def train_multiquery_gp(
         losses[f"epoch_{epoch+1}"] = epoch_loss
         print(f"epoch={epoch+1} loss={epoch_loss:.4f}")
     return losses
-
-
-def train_single_query_gp(
-    x: torch.Tensor,
-    y: torch.Tensor,
-    kernel: WeightedKernel,
-    config: GPTrainingConfig,
-    seed: int,
-) -> SparseGPClassifier:
-    # 固定多核参数，仅训练单 query 的 GP 近似参数
-    model = SparseGPClassifier(
-        _init_inducing_points(
-            x,
-            config.inducing_points,
-            config.inducing_init,
-            seed,
-            config.use_inducing_points,
-        ),
-        kernel,
-    ).to(config.device)
-    likelihood = gpytorch.likelihoods.BernoulliLikelihood().to(config.device)
-    mll = gpytorch.mlls.VariationalELBO(likelihood, model, num_data=x.size(0))
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    for _ in range(config.epochs):
-        model.train()
-        kernel.train()
-        output = model(x)
-        loss = -mll(output, y)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-    return model
-
-
-@torch.no_grad()
-def score_with_gp(
-    model: SparseGPClassifier, x: torch.Tensor
-) -> torch.Tensor:
-    model.eval()
-    output = model(x)
-    return output.mean

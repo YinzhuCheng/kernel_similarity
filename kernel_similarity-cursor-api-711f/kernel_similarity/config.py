@@ -32,7 +32,7 @@ class TrainingSettings:
     # 训练/采样控制参数
     seed: int = 42
     train_ratio: float = 0.9
-    s_neg: int = 64
+    s_neg: int = 3
     s_pos: int = 0
     device: str = "cpu"
 
@@ -45,8 +45,6 @@ class GPSettings:
     batch_queries: int = 4
     epochs: int = 0
     learning_rate: float = 1e-2
-    test_epochs: int = 5
-    test_learning_rate: float = 5e-3
     use_inducing_points: bool = False
 
 
@@ -62,8 +60,6 @@ class KernelSettings:
 @dataclass
 class RetrievalSettings:
     # 候选召回与评测设置
-    candidate_method: str = "bm25"  # bm25 / cosine
-    rerank_top_n: int = 200
     bm25_k1: float = 1.5
     bm25_b: float = 0.75
     metrics_k: Tuple[int, int] = (10, 20)

@@ -1,4 +1,3 @@
-import copy
 import hashlib
 import os
 from typing import Dict, List, Optional, Set, Tuple
@@ -16,16 +15,10 @@ from .data import (
     load_queries,
 )
 from .embeddings import EmbeddingConfig, ensure_embeddings
-from .gp import (
-    GPTrainingConfig,
-    build_query_models,
-    score_with_gp,
-    train_multiquery_gp,
-    train_single_query_gp,
-)
-from .kernels import KernelConfig, build_weighted_kernel, kernel_similarity_scores, kernel_similarity_scores_normalized
+from .gp import GPTrainingConfig, build_query_models, train_multiquery_gp
+from .kernels import KernelConfig, build_weighted_kernel, kernel_similarity_scores_normalized
 from .metrics import aggregate_metrics, mrr_at_k, recall_at_k
-from .retrieval import BM25Index, cosine_similarity_scores, top_n_cosine
+from .retrieval import BM25Index, cosine_similarity_scores
 from .utils import ensure_dir, save_json, set_seed, utc_timestamp
 
 
@@ -53,7 +46,7 @@ def build_training_data(
     device: str,
     build_contrastive: bool,
 ) -> Tuple[Dict[str, Tuple[torch.Tensor, torch.Tensor]], List[Tuple[np.ndarray, np.ndarray, int]]]:
-    # 构造每个 query 的训练点（正负采样）
+    # 构造每个 query 的训练点（每个正样本配套负采样）
     rng = np.random.RandomState(seed)
     all_indices = np.arange(len(doc_embeddings))
     train_data: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
@@ -69,10 +62,18 @@ def build_training_data(
         neg_candidates = np.array([idx for idx in all_indices if idx not in pos_set])
         if len(neg_candidates) == 0:
             continue
-        neg_count = min(s_neg, len(neg_candidates))
-        neg_indices = rng.choice(neg_candidates, size=neg_count, replace=False).tolist()
-        indices = pos_indices + neg_indices
-        labels = [1] * len(pos_indices) + [0] * len(neg_indices)
+        indices: List[int] = []
+        labels: List[int] = []
+        for pos_idx in pos_indices:
+            indices.append(pos_idx)
+            labels.append(1)
+            if s_neg > 0:
+                replace = len(neg_candidates) < s_neg
+                neg_indices = rng.choice(
+                    neg_candidates, size=s_neg, replace=replace
+                ).tolist()
+                indices.extend(neg_indices)
+                labels.extend([0] * len(neg_indices))
         x = torch.tensor(doc_embeddings[indices], dtype=torch.float32, device=device)
         y = torch.tensor(labels, dtype=torch.float32, device=device)
         train_data[qid] = (x, y)
@@ -101,7 +102,7 @@ def evaluate_rankings(
     return aggregate_metrics(metrics)
 
 
-EXPERIMENT_CHOICES: Set[str] = {"bm25", "cosine", "contrastive", "ours", "kernel"}
+EXPERIMENT_CHOICES: Set[str] = {"bm25", "cosine", "contrastive", "ours"}
 
 
 def _validate_experiments(experiments: List[str]) -> List[str]:
@@ -114,16 +115,14 @@ def _validate_experiments(experiments: List[str]) -> List[str]:
     return experiments
 
 
-def _needs_embeddings(experiments: Set[str], candidate_method: str) -> Tuple[bool, bool]:
+def _needs_embeddings(experiments: Set[str]) -> Tuple[bool, bool]:
     # 判断是否需要文档/查询嵌入
     needs_doc = bool(
-        experiments.intersection({"cosine", "contrastive", "ours", "kernel"})
+        experiments.intersection({"cosine", "contrastive", "ours"})
     )
     needs_query = bool(
-        experiments.intersection({"cosine", "contrastive", "kernel"})
+        experiments.intersection({"cosine", "contrastive", "ours"})
     )
-    if "ours" in experiments and candidate_method == "cosine":
-        needs_query = True
     return needs_doc, needs_query
 
 
@@ -149,9 +148,7 @@ def run(config: RunConfig) -> None:
     )
 
     experiments = set(_validate_experiments(config.experiments.experiments))
-    needs_doc_embeddings, needs_query_embeddings = _needs_embeddings(
-        experiments, config.retrieval.candidate_method
-    )
+    needs_doc_embeddings, needs_query_embeddings = _needs_embeddings(experiments)
 
     if (needs_doc_embeddings or needs_query_embeddings) and not config.embedding.api_key and not config.embedding.cache_only:
         raise ValueError("Embedding API key is required unless cache_only is set.")
@@ -209,21 +206,19 @@ def run(config: RunConfig) -> None:
             }
 
     bm25_index = None
-    if "bm25" in experiments or (
-        "ours" in experiments and config.retrieval.candidate_method == "bm25"
-    ):
+    if "bm25" in experiments:
         bm25_index = BM25Index.build(
             doc_texts, k1=config.retrieval.bm25_k1, b=config.retrieval.bm25_b
         )
 
     doc_norms = None
-    if needs_doc_embeddings:
+    if "cosine" in experiments:
         doc_norms = np.linalg.norm(doc_embeddings, axis=1) + 1e-8
 
     train_data: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
     contrastive_pairs: List[Tuple[np.ndarray, np.ndarray, int]] = []
     # 4) 训练数据构造（正负采样）
-    if "ours" in experiments or "contrastive" in experiments or "kernel" in experiments:
+    if "ours" in experiments or "contrastive" in experiments:
         if doc_embeddings.size == 0:
             raise RuntimeError("Doc embeddings required for selected experiments.")
         train_data, contrastive_pairs = build_training_data(
@@ -243,9 +238,8 @@ def run(config: RunConfig) -> None:
 
     kernel = None
     loss_log: Dict[str, float] = {}
-    needs_kernel_training = "ours" in experiments or "kernel" in experiments
-    # 5) 共享多核训练（ours/kernel）
-    if needs_kernel_training:
+    # 5) 共享多核训练（ours）
+    if "ours" in experiments:
         kernel_config = KernelConfig(
             rbf_kernels=config.kernel.rbf_kernels,
             matern_nus=config.kernel.matern_nus,
@@ -300,18 +294,6 @@ def run(config: RunConfig) -> None:
         rankings["contrastive"] = {}
     if "ours" in experiments:
         rankings["ours"] = {}
-    if "kernel" in experiments:
-        rankings["kernel"] = {}
-
-    test_gp_config = GPTrainingConfig(
-        inducing_points=config.gp.inducing_points,
-        inducing_init=config.gp.inducing_init,
-        batch_queries=1,
-        epochs=config.gp.test_epochs,
-        learning_rate=config.gp.test_learning_rate,
-        device=device,
-        use_inducing_points=config.gp.use_inducing_points,
-    )
 
     # 7) 逐 query 评测
     for qid in test_pos_indices:
@@ -333,18 +315,6 @@ def run(config: RunConfig) -> None:
                 cosine_scores.argsort()[::-1][: config.retrieval.max_k].tolist()
             )
 
-        if "kernel" in experiments:
-            if kernel is None:
-                raise RuntimeError("Kernel is required for kernel similarity.")
-            if query_vec is None:
-                raise RuntimeError("Kernel similarity requires query embeddings.")
-            kernel_scores = kernel_similarity_scores_normalized(
-                query_vec, doc_embeddings, kernel, device
-            )
-            rankings["kernel"][qid] = (
-                kernel_scores.argsort()[::-1][: config.retrieval.max_k].tolist()
-            )
-
         if "contrastive" in experiments:
             if contrastive_model is None or query_vec is None:
                 raise RuntimeError("Contrastive baseline requires query embeddings.")
@@ -358,52 +328,14 @@ def run(config: RunConfig) -> None:
         if "ours" in experiments:
             if kernel is None:
                 raise RuntimeError("Kernel is required for our method.")
-            if config.retrieval.candidate_method == "bm25":
-                if bm25_index is None:
-                    raise RuntimeError("BM25 index required for candidate retrieval.")
-                candidate_indices = bm25_index.top_n(
-                    query_text, config.retrieval.rerank_top_n
-                )
-            else:
-                if query_vec is None or doc_norms is None:
-                    raise RuntimeError("Cosine candidates require query/doc embeddings.")
-                candidate_indices = top_n_cosine(
-                    query_vec,
-                    doc_embeddings,
-                    doc_norms,
-                    config.retrieval.rerank_top_n,
-                )
-            candidate_embeddings = torch.tensor(
-                doc_embeddings[candidate_indices], dtype=torch.float32, device=device
+            if query_vec is None:
+                raise RuntimeError("Kernel similarity requires query embeddings.")
+            kernel_scores = kernel_similarity_scores_normalized(
+                query_vec, doc_embeddings, kernel, device
             )
-            test_kernel = copy.deepcopy(kernel).to(device)
-            for param in test_kernel.parameters():
-                param.requires_grad = False
-            test_query_data, _ = build_training_data(
-                [qid],
-                positives,
-                doc_id_to_idx,
-                doc_embeddings,
-                None,
-                config.training.s_neg,
-                config.training.s_pos,
-                query_seed,
-                device,
-                build_contrastive=False,
+            rankings["ours"][qid] = (
+                kernel_scores.argsort()[::-1][: config.retrieval.max_k].tolist()
             )
-            if qid in test_query_data:
-                x_test, y_test = test_query_data[qid]
-                test_model = train_single_query_gp(
-                    x_test, y_test, test_kernel, test_gp_config, query_seed + 100
-                )
-                gp_scores = score_with_gp(test_model, candidate_embeddings).cpu().numpy()
-                ranked_candidate = [
-                    candidate_indices[idx]
-                    for idx in gp_scores.argsort()[::-1].tolist()
-                ]
-            else:
-                ranked_candidate = candidate_indices
-            rankings["ours"][qid] = ranked_candidate[: config.retrieval.max_k]
 
     summary_metrics: Dict[str, Dict[str, float]] = {}
     for exp_name, ranked in rankings.items():
@@ -417,8 +349,6 @@ def run(config: RunConfig) -> None:
         "train_queries": len(train_data),
         "test_queries": len(test_pos_indices),
         "experiments": sorted(experiments),
-        "candidate_method": config.retrieval.candidate_method,
-        "rerank_top_n": config.retrieval.rerank_top_n,
         "kernel_components": kernel.kernel_summary() if kernel else [],
         "kernel_count": len(kernel.base_kernels) if kernel else 0,
         "metrics": summary_metrics,
