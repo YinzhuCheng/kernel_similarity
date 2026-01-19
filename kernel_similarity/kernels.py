@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 import gpytorch
+import numpy as np
 import torch
 
 
@@ -138,3 +139,33 @@ def build_weighted_kernel(config: KernelConfig) -> WeightedKernel:
     return WeightedKernel(
         base_kernels, kernel_labels=labels, initial_weights=initial_weights
     )
+
+
+@torch.no_grad()
+def kernel_similarity_scores(
+    query_vec: np.ndarray,
+    doc_matrix: np.ndarray,
+    kernel: WeightedKernel,
+    device: str,
+    batch_size: int = 1024,
+) -> np.ndarray:
+    if doc_matrix.size == 0:
+        return np.empty((0,), dtype=np.float32)
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive.")
+    kernel.eval()
+    query_tensor = torch.tensor(
+        query_vec, dtype=torch.float32, device=device
+    ).unsqueeze(0)
+    scores = np.empty((doc_matrix.shape[0],), dtype=np.float32)
+    for start in range(0, doc_matrix.shape[0], batch_size):
+        end = min(start + batch_size, doc_matrix.shape[0])
+        batch = torch.tensor(
+            doc_matrix[start:end], dtype=torch.float32, device=device
+        )
+        covar = kernel(query_tensor, batch)
+        batch_scores = (
+            covar.evaluate().squeeze(0).detach().cpu().numpy().astype(np.float32)
+        )
+        scores[start:end] = batch_scores
+    return scores

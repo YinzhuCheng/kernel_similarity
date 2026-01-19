@@ -47,6 +47,7 @@ class GPSettings:
     learning_rate: float = 1e-2
     test_epochs: int = 5
     test_learning_rate: float = 5e-3
+    use_inducing_points: bool = True
 
 
 @dataclass

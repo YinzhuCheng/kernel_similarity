@@ -16,6 +16,7 @@ class GPTrainingConfig:
     epochs: int
     learning_rate: float
     device: str
+    use_inducing_points: bool = True
 
 
 class SparseGPClassifier(gpytorch.models.ApproximateGP):
@@ -40,8 +41,14 @@ class SparseGPClassifier(gpytorch.models.ApproximateGP):
 
 
 def _init_inducing_points(
-    x: torch.Tensor, m: int, method: str, seed: int = 0
+    x: torch.Tensor,
+    m: int,
+    method: str,
+    seed: int = 0,
+    use_inducing_points: bool = True,
 ) -> torch.Tensor:
+    if not use_inducing_points:
+        return x.clone()
     if m >= x.size(0):
         return x.clone()
     if method == "kmeans":
@@ -64,7 +71,11 @@ def build_query_models(
     models: Dict[str, SparseGPClassifier] = {}
     for idx, (qid, (x, _)) in enumerate(train_data.items()):
         inducing = _init_inducing_points(
-            x, config.inducing_points, config.inducing_init, seed + idx
+            x,
+            config.inducing_points,
+            config.inducing_init,
+            seed + idx,
+            config.use_inducing_points,
         )
         models[qid] = SparseGPClassifier(inducing, kernel).to(config.device)
     return models
@@ -132,7 +143,13 @@ def train_single_query_gp(
 ) -> SparseGPClassifier:
     # 固定多核参数，仅训练单 query 的 GP 近似参数
     model = SparseGPClassifier(
-        _init_inducing_points(x, config.inducing_points, config.inducing_init, seed),
+        _init_inducing_points(
+            x,
+            config.inducing_points,
+            config.inducing_init,
+            seed,
+            config.use_inducing_points,
+        ),
         kernel,
     ).to(config.device)
     likelihood = gpytorch.likelihoods.BernoulliLikelihood().to(config.device)

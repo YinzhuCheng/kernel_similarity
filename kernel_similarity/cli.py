@@ -23,7 +23,7 @@ from .gp import (
     train_multiquery_gp,
     train_single_query_gp,
 )
-from .kernels import KernelConfig, build_weighted_kernel
+from .kernels import KernelConfig, build_weighted_kernel, kernel_similarity_scores
 from .metrics import aggregate_metrics, mrr_at_k, recall_at_k
 from .retrieval import BM25Index, cosine_similarity_scores, top_n_cosine
 from .utils import ensure_dir, save_json, set_seed, utc_timestamp
@@ -101,7 +101,7 @@ def evaluate_rankings(
     return aggregate_metrics(metrics)
 
 
-EXPERIMENT_CHOICES: Set[str] = {"bm25", "cosine", "contrastive", "ours"}
+EXPERIMENT_CHOICES: Set[str] = {"bm25", "cosine", "contrastive", "ours", "kernel"}
 
 
 def _validate_experiments(experiments: List[str]) -> List[str]:
@@ -116,8 +116,12 @@ def _validate_experiments(experiments: List[str]) -> List[str]:
 
 def _needs_embeddings(experiments: Set[str], candidate_method: str) -> Tuple[bool, bool]:
     # 判断是否需要文档/查询嵌入
-    needs_doc = bool(experiments.intersection({"cosine", "contrastive", "ours"}))
-    needs_query = bool(experiments.intersection({"cosine", "contrastive"}))
+    needs_doc = bool(
+        experiments.intersection({"cosine", "contrastive", "ours", "kernel"})
+    )
+    needs_query = bool(
+        experiments.intersection({"cosine", "contrastive", "kernel"})
+    )
     if "ours" in experiments and candidate_method == "cosine":
         needs_query = True
     return needs_doc, needs_query
@@ -219,7 +223,7 @@ def run(config: RunConfig) -> None:
     train_data: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
     contrastive_pairs: List[Tuple[np.ndarray, np.ndarray, int]] = []
     # 4) 训练数据构造（正负采样）
-    if "ours" in experiments or "contrastive" in experiments:
+    if "ours" in experiments or "contrastive" in experiments or "kernel" in experiments:
         if doc_embeddings.size == 0:
             raise RuntimeError("Doc embeddings required for selected experiments.")
         train_data, contrastive_pairs = build_training_data(
@@ -239,8 +243,9 @@ def run(config: RunConfig) -> None:
 
     kernel = None
     loss_log: Dict[str, float] = {}
-    # 5) 共享多核训练（仅 our method）
-    if "ours" in experiments:
+    needs_kernel_training = "ours" in experiments or "kernel" in experiments
+    # 5) 共享多核训练（ours/kernel）
+    if needs_kernel_training:
         kernel_config = KernelConfig(
             rbf_kernels=config.kernel.rbf_kernels,
             matern_nus=config.kernel.matern_nus,
@@ -255,6 +260,7 @@ def run(config: RunConfig) -> None:
             epochs=config.gp.epochs,
             learning_rate=config.gp.learning_rate,
             device=device,
+            use_inducing_points=config.gp.use_inducing_points,
         )
         models = build_query_models(train_data, kernel, gp_config, config.training.seed)
         loss_log = train_multiquery_gp(train_data, models, kernel, gp_config)
@@ -294,6 +300,8 @@ def run(config: RunConfig) -> None:
         rankings["contrastive"] = {}
     if "ours" in experiments:
         rankings["ours"] = {}
+    if "kernel" in experiments:
+        rankings["kernel"] = {}
 
     test_gp_config = GPTrainingConfig(
         inducing_points=config.gp.inducing_points,
@@ -302,6 +310,7 @@ def run(config: RunConfig) -> None:
         epochs=config.gp.test_epochs,
         learning_rate=config.gp.test_learning_rate,
         device=device,
+        use_inducing_points=config.gp.use_inducing_points,
     )
 
     # 7) 逐 query 评测
@@ -322,6 +331,18 @@ def run(config: RunConfig) -> None:
             )
             rankings["cosine"][qid] = (
                 cosine_scores.argsort()[::-1][: config.retrieval.max_k].tolist()
+            )
+
+        if "kernel" in experiments:
+            if kernel is None:
+                raise RuntimeError("Kernel is required for kernel similarity.")
+            if query_vec is None:
+                raise RuntimeError("Kernel similarity requires query embeddings.")
+            kernel_scores = kernel_similarity_scores(
+                query_vec, doc_embeddings, kernel, device
+            )
+            rankings["kernel"][qid] = (
+                kernel_scores.argsort()[::-1][: config.retrieval.max_k].tolist()
             )
 
         if "contrastive" in experiments:
