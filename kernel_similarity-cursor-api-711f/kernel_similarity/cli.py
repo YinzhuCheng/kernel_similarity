@@ -1,4 +1,3 @@
-import copy
 import hashlib
 import os
 from typing import Dict, List, Optional, Set, Tuple
@@ -16,18 +15,8 @@ from .data import (
     load_queries,
 )
 from .embeddings import EmbeddingConfig, ensure_embeddings
-from .gp import (
-    GPTrainingConfig,
-    build_query_models,
-    score_with_gp_batches,
-    train_multiquery_gp,
-    train_single_query_gp,
-)
-from .kernels import (
-    KernelConfig,
-    build_weighted_kernel,
-    kernel_similarity_scores_normalized,
-)
+from .gp import GPTrainingConfig, build_query_models, train_multiquery_gp
+from .kernels import KernelConfig, build_weighted_kernel, kernel_similarity_scores_normalized
 from .metrics import aggregate_metrics, mrr_at_k, recall_at_k
 from .retrieval import BM25Index, cosine_similarity_scores
 from .utils import ensure_dir, save_json, set_seed, utc_timestamp
@@ -113,7 +102,7 @@ def evaluate_rankings(
     return aggregate_metrics(metrics)
 
 
-EXPERIMENT_CHOICES: Set[str] = {"bm25", "cosine", "contrastive", "ours", "kernel"}
+EXPERIMENT_CHOICES: Set[str] = {"bm25", "cosine", "contrastive", "ours"}
 
 
 def _validate_experiments(experiments: List[str]) -> List[str]:
@@ -129,10 +118,10 @@ def _validate_experiments(experiments: List[str]) -> List[str]:
 def _needs_embeddings(experiments: Set[str]) -> Tuple[bool, bool]:
     # 判断是否需要文档/查询嵌入
     needs_doc = bool(
-        experiments.intersection({"cosine", "contrastive", "ours", "kernel"})
+        experiments.intersection({"cosine", "contrastive", "ours"})
     )
     needs_query = bool(
-        experiments.intersection({"cosine", "contrastive", "kernel", "ours"})
+        experiments.intersection({"cosine", "contrastive", "ours"})
     )
     return needs_doc, needs_query
 
@@ -229,7 +218,7 @@ def run(config: RunConfig) -> None:
     train_data: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
     contrastive_pairs: List[Tuple[np.ndarray, np.ndarray, int]] = []
     # 4) 训练数据构造（正负采样）
-    if "ours" in experiments or "contrastive" in experiments or "kernel" in experiments:
+    if "ours" in experiments or "contrastive" in experiments:
         if doc_embeddings.size == 0:
             raise RuntimeError("Doc embeddings required for selected experiments.")
         train_data, contrastive_pairs = build_training_data(
@@ -249,9 +238,8 @@ def run(config: RunConfig) -> None:
 
     kernel = None
     loss_log: Dict[str, float] = {}
-    needs_kernel_training = "ours" in experiments or "kernel" in experiments
-    # 5) 共享多核训练（ours/kernel）
-    if needs_kernel_training:
+    # 5) 共享多核训练（ours）
+    if "ours" in experiments:
         kernel_config = KernelConfig(
             rbf_kernels=config.kernel.rbf_kernels,
             matern_nus=config.kernel.matern_nus,
@@ -306,18 +294,6 @@ def run(config: RunConfig) -> None:
         rankings["contrastive"] = {}
     if "ours" in experiments:
         rankings["ours"] = {}
-    if "kernel" in experiments:
-        rankings["kernel"] = {}
-
-    test_gp_config = GPTrainingConfig(
-        inducing_points=config.gp.inducing_points,
-        inducing_init=config.gp.inducing_init,
-        batch_queries=1,
-        epochs=config.gp.test_epochs,
-        learning_rate=config.gp.test_learning_rate,
-        device=device,
-        use_inducing_points=config.gp.use_inducing_points,
-    )
 
     # 7) 逐 query 评测
     for qid in test_pos_indices:
@@ -339,18 +315,6 @@ def run(config: RunConfig) -> None:
                 cosine_scores.argsort()[::-1][: config.retrieval.max_k].tolist()
             )
 
-        if "kernel" in experiments:
-            if kernel is None:
-                raise RuntimeError("Kernel is required for kernel similarity.")
-            if query_vec is None:
-                raise RuntimeError("Kernel similarity requires query embeddings.")
-            kernel_scores = kernel_similarity_scores_normalized(
-                query_vec, doc_embeddings, kernel, device
-            )
-            rankings["kernel"][qid] = (
-                kernel_scores.argsort()[::-1][: config.retrieval.max_k].tolist()
-            )
-
         if "contrastive" in experiments:
             if contrastive_model is None or query_vec is None:
                 raise RuntimeError("Contrastive baseline requires query embeddings.")
@@ -364,35 +328,14 @@ def run(config: RunConfig) -> None:
         if "ours" in experiments:
             if kernel is None:
                 raise RuntimeError("Kernel is required for our method.")
-            test_kernel = copy.deepcopy(kernel).to(device)
-            for param in test_kernel.parameters():
-                param.requires_grad = False
-            test_query_data, _ = build_training_data(
-                [qid],
-                positives,
-                doc_id_to_idx,
-                doc_embeddings,
-                None,
-                config.training.s_neg,
-                config.training.s_pos,
-                query_seed,
-                device,
-                build_contrastive=False,
+            if query_vec is None:
+                raise RuntimeError("Kernel similarity requires query embeddings.")
+            kernel_scores = kernel_similarity_scores_normalized(
+                query_vec, doc_embeddings, kernel, device
             )
-            if qid in test_query_data:
-                x_test, y_test = test_query_data[qid]
-                test_model = train_single_query_gp(
-                    x_test, y_test, test_kernel, test_gp_config, query_seed + 100
-                )
-                gp_scores = score_with_gp_batches(
-                    test_model, doc_embeddings, device
-                )
-                ranked_docs = (
-                    gp_scores.argsort()[::-1][: config.retrieval.max_k].tolist()
-                )
-            else:
-                ranked_docs = []
-            rankings["ours"][qid] = ranked_docs
+            rankings["ours"][qid] = (
+                kernel_scores.argsort()[::-1][: config.retrieval.max_k].tolist()
+            )
 
     summary_metrics: Dict[str, Dict[str, float]] = {}
     for exp_name, ranked in rankings.items():
@@ -406,8 +349,6 @@ def run(config: RunConfig) -> None:
         "train_queries": len(train_data),
         "test_queries": len(test_pos_indices),
         "experiments": sorted(experiments),
-        "candidate_method": config.retrieval.candidate_method,
-        "rerank_top_n": config.retrieval.rerank_top_n,
         "kernel_components": kernel.kernel_summary() if kernel else [],
         "kernel_count": len(kernel.base_kernels) if kernel else 0,
         "metrics": summary_metrics,

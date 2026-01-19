@@ -71,15 +71,3 @@ def cosine_similarity_scores(
     return scores
 
 
-def top_n_cosine(
-    query_vec: np.ndarray,
-    doc_matrix: np.ndarray,
-    doc_norms: np.ndarray,
-    n: int,
-) -> List[int]:
-    scores = cosine_similarity_scores(query_vec, doc_matrix, doc_norms)
-    if n >= len(scores):
-        return scores.argsort()[::-1].tolist()
-    idx = np.argpartition(scores, -n)[-n:]
-    ranked = idx[np.argsort(scores[idx])[::-1]]
-    return ranked.tolist()

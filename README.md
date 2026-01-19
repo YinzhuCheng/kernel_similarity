@@ -21,3 +21,4 @@ Edit parameters in `kernel_similarity-cursor-api-711f/kernel_similarity/config.p
 - Use `cache_dir` and `cache_only` to reuse cached embeddings.
 - Query splits are saved to `DataConfig.split_path` and reused on subsequent runs.
 - Output summary is written to `runs/summary_<timestamp>.json` with kernel weights and metrics.
+ - Our method retrieves by learned kernel similarity (no two-stage rerank).
