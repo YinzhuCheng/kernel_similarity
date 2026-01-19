@@ -32,7 +32,7 @@ class TrainingSettings:
     # 训练/采样控制参数
     seed: int = 42
     train_ratio: float = 0.9
-    s_neg: int = 64
+    s_neg: int = 3
     s_pos: int = 0
     device: str = "cpu"
 

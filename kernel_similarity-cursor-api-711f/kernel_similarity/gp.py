@@ -31,7 +31,8 @@ class SparseGPClassifier(gpytorch.models.ApproximateGP):
             learn_inducing_locations=True,
         )
         super().__init__(variational_strategy)
-        self.mean_module = gpytorch.means.ZeroMean()
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.mean_module.initialize(constant=0.0)
         self.covar_module = kernel
 
     def forward(self, x):
@@ -173,3 +174,25 @@ def score_with_gp(
     model.eval()
     output = model(x)
     return output.mean
+
+
+@torch.no_grad()
+def score_with_gp_batches(
+    model: SparseGPClassifier,
+    doc_embeddings: np.ndarray,
+    device: str,
+    batch_size: int = 1024,
+) -> np.ndarray:
+    if doc_embeddings.size == 0:
+        return np.empty((0,), dtype=np.float32)
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive.")
+    scores = np.empty((doc_embeddings.shape[0],), dtype=np.float32)
+    for start in range(0, doc_embeddings.shape[0], batch_size):
+        end = min(start + batch_size, doc_embeddings.shape[0])
+        batch = torch.tensor(
+            doc_embeddings[start:end], dtype=torch.float32, device=device
+        )
+        batch_scores = score_with_gp(model, batch).detach().cpu().numpy()
+        scores[start:end] = batch_scores
+    return scores

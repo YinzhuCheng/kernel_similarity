@@ -8,7 +8,7 @@ Multi-kernel sparse GP ranking with per-query GPs and shared kernel learning.
 - Shared multi-kernel parameters (RBF, Matern, Polynomial) learned on training queries.
 - Baselines: BM25, cosine similarity, and a simple contrastive retriever.
 - Metrics: `recall@10`, `recall@20`, and `mrr@10`.
-- Rerank mode for candidate trimming (BM25 or cosine).
+- Full-corpus GP retrieval without candidate rerank.
 
 ## Install
 `pip install -r requirements.txt`
@@ -23,12 +23,11 @@ Edit parameters in `kernel_similarity/config.py`, then start with:
 - Open `run.py` and press Run in your IDE, or
 - Double-click `run.bat` on Windows
 
-Default training uses 20% of queries for kernel learning and 80% for evaluation. Each test query trains a new sparse GP with fixed kernel parameters and its own sampled positives/negatives, then reranks candidates by the GP posterior mean.
+Default training uses 20% of queries for kernel learning and 80% for evaluation. Each test query trains a new sparse GP with fixed kernel parameters and its own sampled positives/negatives, then scores the full corpus with the GP posterior mean.
 
 ## Notes
 - GP training defaults to CPU; set `TrainingSettings.device = "cuda"` to enable GPU when available.
 - Use `cache_dir` and `cache_only` to reuse cached embeddings.
-- Candidate reranking defaults to top 200 documents (`RetrievalSettings.rerank_top_n`).
 - Use `ExperimentSettings.experiments` to run a single experiment (e.g., `["bm25"]`, `["kernel"]`, or `["ours"]`).
 - Query splits are saved to `DataConfig.split_path` and reused on subsequent runs.
 - Output summary is written to `runs/summary_<timestamp>.json` with kernel weights and metrics.
