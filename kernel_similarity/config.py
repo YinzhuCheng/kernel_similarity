@@ -21,6 +21,7 @@ class EmbeddingSettings:
     doc_model: str = "text-embedding-3-large"
     query_model: str = "text-embedding-3-large"
     batch_size: int = 32
+    concurrency: int = 4
     timeout: float = 60.0
     cache_dir: str = "cache"
     cache_only: bool = False
@@ -46,16 +47,16 @@ class GPSettings:
     learning_rate: float = 1e-2
     test_epochs: int = 5
     test_learning_rate: float = 5e-3
+    use_inducing_points: bool = True
 
 
 @dataclass
 class KernelSettings:
     # 多核配置
-    use_rbf: bool = True
-    use_matern: bool = True
-    matern_nu: float = 2.5
-    use_poly: bool = True
-    poly_degree: int = 2
+    rbf_kernels: int = 1
+    matern_nus: List[float] = field(default_factory=lambda: [2.5])
+    poly_degrees: List[int] = field(default_factory=lambda: [2])
+    poly_offsets: List[float] = field(default_factory=lambda: [0.0])
 
 
 @dataclass
