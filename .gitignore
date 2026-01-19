@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+venv/
+cache/
+runs/
+*.npz
+*.npy
+.DS_Store
+.idea/
+.vscode/
