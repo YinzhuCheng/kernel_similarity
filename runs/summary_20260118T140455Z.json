@@ -1,0 +1,21 @@
+{
+  "run_id": "20260118T140455Z",
+  "train_queries": 0,
+  "test_queries": 240,
+  "experiments": [
+    "bm25"
+  ],
+  "candidate_method": "bm25, cosine",
+  "rerank_top_n": 200,
+  "kernel_components": [],
+  "kernel_count": 0,
+  "metrics": {
+    "bm25": {
+      "recall@10": 0.7,
+      "recall@20": 0.7833333333333333,
+      "mrr@10": 0.5436623677248676
+    }
+  },
+  "train_loss": {},
+  "split_path": "runs/query_split.json"
+}
